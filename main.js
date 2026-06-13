@@ -1,4 +1,4 @@
-import * as webllm from "https://esm.sh/@mlc-ai/web-llm@0.2.83?bundle";
+import * as webllm from "https://esm.run/@mlc-ai/web-llm";
 
 const $ = (id) => document.getElementById(id);
 
@@ -66,7 +66,7 @@ const SCENES = [
     facilitator_goal: "深入到根因与可验证假设，拿到可行动洞察（触发点、替代品、决策链）。",
     participant_name: "陈奕",
     participant_role: "刚流失的付费用户",
-    participant_style: "礼貌但不耐烦；会给笼统理由，需要你追问到细节。",
+    participant_style: "礼貌但不聐烦；会给笼统理由，需要你追问到细节。",
     known_facts: ["使用你产品约2个月后取消续费", "团队规模约20人", "第3周反馈过“上手成本高”"],
     unknowns: ["取消续费的决定性事件是什么？", "用了什么替代方案？为什么？", "谁参与了决策？评估标准是什么？"],
     needs: ["节省时间", "被理解而非被推销"],
@@ -75,7 +75,7 @@ const SCENES = [
   {
     id: "coaching",
     title: "一对一教练：成员倦怠与状态恢复",
-    facilitator_goal: "把感受说清楚、识别需求与边界，并形成一个可执行的小步行动计划。",
+    facilitator_goal: "把感受说渝楚、识别需求与边界，并形成一个可执行的小步行动计划。",
     participant_name: "小周",
     participant_role: "核心成员（近期倦怠）",
     participant_style: "情绪低落、表达含糊；需要安全感与结构化引导。",
@@ -88,6 +88,19 @@ const SCENES = [
 
 let engine = null;
 let session = null; // {scene, messages, coachText}
+
+function getRuntimeIssue() {
+  if (!window.isSecureContext) {
+    return "当前环境不是安全上下文。请使用 https 地址打开，或在本机用 localhost 访问。";
+  }
+  if (typeof caches === "undefined") {
+    return "当前浏览器环境缺少 Cache Storage 能力，无法初始化模型缓存。请改用正常桌面浏览器打开页面。";
+  }
+  if (!navigator.gpu) {
+    return "当前浏览器未提�k WebGPU。请使用最新版 Chrome / Edge，并确认系统已启用硬件加速。";
+  }
+  return null;
+}
 
 function escapeHtml(s) {
   return String(s)
@@ -107,17 +120,36 @@ function renderSceneOptions() {
 }
 
 function renderSceneInfo(s) {
+  const facts = (s.known_facts || []).slice(0, 2).map((item) => `<li>${escapeHtml(item)}</li>`).join("");
   sceneInfo.innerHTML = `
-    <div><b>${escapeHtml(s.title)}</b></div>
-    <div style="margin-top:6px">促动师目标：${escapeHtml(s.facilitator_goal)}</div>
-    <div style="margin-top:6px">对话对象：${escapeHtml(s.participant_name)}（${escapeHtml(s.participant_role)}）</div>
-    <div style="margin-top:6px">状态：${escapeHtml(s.participant_style)}</div>
+    <div style="font-size:18px;font-weight:700;color:#f4f7fb">${escapeHtml(s.title)}</div>
+    <div style="margin-top:12px;color:#d7e0eb;line-height:1.75">训练目标：${escapeHtml(s.facilitator_goal)}</div>
+    <div style="margin-top:14px;padding:14px;border-radius:16px;border:1px solid rgba(255,255,255,.08);background:rgba(255,255,255,.03)">
+      <div style="font-size:12px;color:#9db0c8;margin-bottom:6px">对话对象</div>
+      <div style="font-size:15px;color:#f4f7fb">${escapeHtml(s.participant_name)}｜${escapeHtml(s.participant_role)}</div>
+      <div style="margin-top:6px;font-size:13px;color:#b9c7d9;line-height:1.7">${escapeHtml(s.participant_style)}</div>
+    </div>
+    <div style="margin-top:16px">
+      <div style="font-size:12px;color:#9db0c8;margin-bottom:8px">你可以围绕这些信息开始提问</div>
+      <ul style="margin:0;padding-left:18px;color:#c8d5e5;line-height:1.75">${facts}</ul>
+    </div>
   `;
 }
 
 function renderChat() {
+  if (!session) {
+    chatEl.innerHTML = `
+      <div style="min-height:420px;display:grid;place-items:center">
+        <div style="max-width:560px;text-align:center">
+          <div style="display:inline-flex;align-items:center;gap:8px;padding:8px 12px;border-radius:999px;border:1px solid rgba(255,255,255,.08);background:rgba(255,255,255,.04);font-size:12px;color:#cdd9e8">准备开始训练</div>
+          <div style="font-size:28px;font-weight:700;letter-spacing:-.03em;margin-top:18px">先完成左侧 3 个步骤，这里就会进入正式对话。</div>
+          <div style="margin-top:12px;color:#9fb1c8;line-height:1.8">加载模型 → 选择场景 → 点击“开始训练”。完成后你就能直接练习提问和对话推进。</div>
+        </div>
+      </div>
+    `;
+    return;
+  }
   chatEl.innerHTML = "";
-  if (!session) return;
   for (const m of session.messages) {
     const cls = m.role === "facilitator" ? "fac" : "par";
     const meta = m.role === "facilitator" ? "你（促动师）" : "对话对象";
@@ -191,6 +223,12 @@ async function loadModel() {
   const modelId = modelSel.value;
   loadBtn.disabled = true;
   loadStatus.textContent = "初始化中（需要 WebGPU）...";
+  const runtimeIssue = getRuntimeIssue();
+  if (runtimeIssue) {
+    loadStatus.textContent = `加载失败：${runtimeIssue}`;
+    loadBtn.disabled = false;
+    return;
+  }
   try {
     engine = await webllm.CreateMLCEngine(modelId, {
       initProgressCallback: (report) => {
@@ -201,7 +239,7 @@ async function loadModel() {
     newBtn.disabled = false;
   } catch (e) {
     console.error(e);
-    loadStatus.textContent = `加载失败：${String(e)}\n建议：确认使用 Chrome/Edge 且开启 WebGPU；或换更小模型。`;
+    loadStatus.textContent = `加载失败：${String(e)}\n建议：确认使用 https 或 localhost 打开；使用最新版 Chrome/Edge；并检查浏览器已启用 WebGPU 与硬件加速。`;
   } finally {
     loadBtn.disabled = false;
   }
@@ -296,6 +334,7 @@ function exportJSON() {
 
 // wiring
 renderSceneOptions();
+renderChat();
 sceneSel.addEventListener("change", () => renderSceneInfo(SCENES.find((s) => s.id === sceneSel.value) || SCENES[0]));
 loadBtn.addEventListener("click", loadModel);
 newBtn.addEventListener("click", newSession);
@@ -308,4 +347,3 @@ inputEl.addEventListener("keydown", (e) => {
     sendBtn.click();
   }
 });
-
