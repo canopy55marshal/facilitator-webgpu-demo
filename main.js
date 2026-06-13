@@ -109,6 +109,24 @@ function escapeHtml(s) {
     .replaceAll(">", "&gt;");
 }
 
+function syncComposerState() {
+  const canChat = !!engine && !!session;
+  inputEl.disabled = !canChat;
+  sendBtn.disabled = !canChat;
+  finishBtn.disabled = !canChat;
+  exportBtn.disabled = !session;
+
+  if (!engine) {
+    inputEl.placeholder = "请先加载模型，加载完成后会自动进入训练...";
+  } else if (!session) {
+    inputEl.placeholder = "模型已加载，正在进入训练...";
+  } else {
+    inputEl.placeholder = "输入你的问题（你是促动师）...";
+  }
+
+  newBtn.textContent = engine ? "重新开始训练" : "开始训练";
+}
+
 function renderSceneOptions() {
   for (const s of SCENES) {
     const opt = document.createElement("option");
@@ -235,13 +253,16 @@ async function loadModel() {
         loadStatus.textContent = `${report.text || "加载中"} ${report.progress ? Math.round(report.progress * 100) + "%" : ""}`;
       },
     });
-    loadStatus.textContent = `已加载：${modelId}`;
     newBtn.disabled = false;
+    loadStatus.textContent = `已加载：${modelId}，正在进入训练...`;
+    newSession();
+    loadStatus.textContent = `已加载：${modelId}`;
   } catch (e) {
     console.error(e);
     loadStatus.textContent = `加载失败：${String(e)}\n建议：确认使用 https 或 localhost 打开；使用最新版 Chrome/Edge；并检查浏览器已启用 WebGPU 与硬件加速。`;
   } finally {
     loadBtn.disabled = false;
+    syncComposerState();
   }
 }
 
@@ -254,10 +275,7 @@ function newSession() {
     coachText: "",
   };
   coachEl.textContent = "尚未完成练习。";
-  inputEl.disabled = false;
-  sendBtn.disabled = false;
-  finishBtn.disabled = false;
-  exportBtn.disabled = false;
+  syncComposerState();
   renderChat();
   inputEl.focus();
 }
@@ -266,6 +284,7 @@ async function send() {
   const text = inputEl.value.trim();
   if (!text || !engine || !session) return;
   inputEl.value = "";
+  inputEl.disabled = true;
   sendBtn.disabled = true;
   finishBtn.disabled = true;
   session.messages.push({ role: "facilitator", content: text, ts: Date.now() });
@@ -292,13 +311,13 @@ async function send() {
   }
   session.messages.push({ role: "participant", content: out || "（未生成回复）", ts: Date.now() });
   renderChat();
-  sendBtn.disabled = false;
-  finishBtn.disabled = false;
+  syncComposerState();
   inputEl.focus();
 }
 
 async function finish() {
   if (!engine || !session) return;
+  inputEl.disabled = true;
   finishBtn.disabled = true;
   sendBtn.disabled = true;
   coachEl.textContent = "生成复盘中...";
@@ -315,8 +334,7 @@ async function finish() {
   session.coachText = out;
   coachEl.textContent = out;
 
-  finishBtn.disabled = false;
-  sendBtn.disabled = false;
+  syncComposerState();
 }
 
 function exportJSON() {
@@ -335,6 +353,7 @@ function exportJSON() {
 // wiring
 renderSceneOptions();
 renderChat();
+syncComposerState();
 sceneSel.addEventListener("change", () => renderSceneInfo(SCENES.find((s) => s.id === sceneSel.value) || SCENES[0]));
 loadBtn.addEventListener("click", loadModel);
 newBtn.addEventListener("click", newSession);
